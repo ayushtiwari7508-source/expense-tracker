@@ -1,36 +1,68 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Expense Tracker — Frontend
 
-## Getting Started
+Next.js 14 (App Router) + TypeScript + Tailwind CSS + ECharts client for the
+Expense Tracker API. The browser talks to the FastAPI backend directly; all
+charts and analytics figures are rendered from API responses.
 
-First, run the development server:
+## Stack
+
+| Concern   | Technology |
+|-----------|------------|
+| Framework | Next.js 14 App Router, React 18 |
+| Language  | TypeScript |
+| Styling   | Tailwind CSS |
+| Charts    | ECharts 6 |
+| Icons     | lucide-react |
+
+## Routes
+
+| Route | Description |
+|---|---|
+| `/` | Landing page (redirects to login or dashboard) |
+| `/login`, `/register` | JWT authentication |
+| `/dashboard` | Overview: totals, recent expenses |
+| `/expenses` | CRUD list with filters |
+| `/budgets` | Budget management with alert thresholds |
+| `/alerts` | Budget alert feed |
+| `/analytics` | Aggregation, top-N, and time-series charts |
+| `/settings` | Profile and password management |
+| `/api-health` | Minimal liveness endpoint (container healthcheck target) |
+
+## Environment
+
+`NEXT_PUBLIC_API_URL` is the API base URL and is **baked into the client
+bundle at build time**. Changing it requires a rebuild.
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# .env.local for local development (defaults to the compose API)
+NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+No backend secrets live in this app — the browser holds only the JWT access
+token it receives at login.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Development
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm ci
+npm run dev        # http://localhost:3000
+```
 
-## Learn More
+The API must be running (see the root README for `docker compose up -d db api`
+or a local uvicorn setup).
 
-To learn more about Next.js, take a look at the following resources:
+## Production build
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run lint
+npm run build      # output: "standalone" (server.js + traced deps)
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The Docker image (`Dockerfile`) is a multi-stage build producing a minimal
+non-root runtime with a healthcheck on `/api-health`.
 
-## Deploy on Vercel
+## Checks against a running API
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+E2E_API_URL=http://localhost:8000/api/v1 ../scripts/e2e_frontend_checks.sh
+```

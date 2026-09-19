@@ -232,3 +232,7 @@ PostgreSQL** (e.g. Neon/Render DB/Railway Postgres).
 3. **Docker** — build both images (backend + frontend with build args).
 
 Failures fail the pipeline; no `|| true`, no suppressed errors.
+
+## License
+
+[MIT](LICENSE) © Ayush Tiwari

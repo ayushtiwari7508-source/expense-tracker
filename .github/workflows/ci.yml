@@ -44,8 +44,12 @@ jobs:
           pip install -e .
 
       - name: Create test database
+        # The postgres service may already have created it via POSTGRES_DB;
+        # only create when missing so the step is idempotent.
         run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE expense_tracker_test;"
+          if ! PGPASSWORD=postgres psql -h localhost -U postgres -tc "SELECT 1 FROM pg_database WHERE datname = 'expense_tracker_test'" | grep -q 1; then
+            PGPASSWORD=postgres psql -h localhost -U postgres -c "CREATE DATABASE expense_tracker_test;"
+          fi
 
       - name: Run migrations against the test database
         working-directory: backend

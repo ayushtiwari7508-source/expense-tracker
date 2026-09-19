@@ -37,6 +37,21 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Liveness probe against the app's own /api/v1/health endpoint using the
+    # Python stdlib already present in the image (no curl/wget installed).
+    # start_period covers entrypoint wait-for-db + alembic migrations.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/api/v1/health' % os.environ.get('PORT', '8000'), timeout=5)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   frontend:
     build:

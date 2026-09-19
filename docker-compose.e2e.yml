@@ -1,0 +1,8 @@
+# TEMPORARY override used ONLY while the Playwright E2E suite runs.
+# It points the api service at the dedicated E2E database so tests never
+# touch development data. Restore the normal stack afterwards with:
+#   docker compose up -d --force-recreate api
+services:
+  api:
+    environment:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/expense_tracker_e2e

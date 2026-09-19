@@ -1,0 +1,40 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+!.env.example
+!**/.env.example
+
+# Node / Frontend
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Alembic
+backend/alembic/versions/*.pyc
+
+# Tooling
+.mypy_cache/
+.ruff_cache/
+
+# OS
+.DS_Store
+
+# Local artifacts
+*.db
+*.sqlite3

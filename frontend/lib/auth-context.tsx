@@ -1,7 +1,11 @@
 "use client";
 
-// Auth context: holds the current user, exposes login/register/logout,
-// and reacts to 401s from the API client by clearing the session.
+// Auth context: holds the current user, exposes login/register/logout.
+//
+// The JWT lives in an HttpOnly cookie set by the backend; this code never
+// sees or stores the token. Session state is restored by calling /auth/me
+// (the browser attaches the cookie automatically), which also means
+// authentication survives page refreshes.
 
 import { useRouter } from "next/navigation";
 import {
@@ -13,7 +17,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ApiError, authApi, getToken, setToken } from "./api";
+import { ApiError, authApi } from "./api";
 import type { User } from "./types";
 
 interface AuthState {
@@ -21,7 +25,7 @@ interface AuthState {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
-  logout: () => void;
+  logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
 
@@ -32,19 +36,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
-  const logout = useCallback(() => {
-    setToken(null);
+  const logout = useCallback(async () => {
+    try {
+      // Server clears the HttpOnly cookie. Best-effort: always drop local
+      // session state, even if the request fails.
+      await authApi.logout();
+    } catch {
+      // ignore — the local session is cleared regardless
+    }
     setUser(null);
     router.push("/login");
   }, [router]);
 
-  // One global 401 handler: expired/invalid tokens sign the user out.
+  // One global 401 handler: an expired/invalid session signs the user out.
+  // Scoped to API requests and excluding the auth endpoints themselves so a
+  // failed /auth/me bootstrap or wrong-password login cannot loop redirects.
   useEffect(() => {
     const original = window.fetch;
     window.fetch = async (...args) => {
       const response = await original(...args);
-      if (response.status === 401 && getToken()) {
-        setToken(null);
+      const url =
+        typeof args[0] === "string" || args[0] instanceof URL
+          ? String(args[0])
+          : (args[0] instanceof Request ? args[0].url : "");
+      const isApiCall = url.includes("/api/");
+      const isAuthEndpoint = url.includes("/auth/login") || url.includes("/auth/me");
+      if (response.status === 401 && isApiCall && !isAuthEndpoint) {
         setUser(null);
         router.push("/login");
       }
@@ -55,18 +72,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [router]);
 
+  // Bootstrap: ask the backend who we are; the cookie decides the answer.
   useEffect(() => {
     let cancelled = false;
     async function bootstrap() {
-      if (!getToken()) {
-        setLoading(false);
-        return;
-      }
       try {
         const me = await authApi.me();
         if (!cancelled) setUser(me);
       } catch {
-        setToken(null);
+        // 401 or network failure: not signed in.
+        if (!cancelled) setUser(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -78,16 +93,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = useCallback(async (email: string, password: string) => {
-    const token = await authApi.login({ email, password });
-    setToken(token.access_token);
-    const me = await authApi.me();
-    setUser(me);
+    // The response sets the HttpOnly cookie and returns the profile; the
+    // session itself is proven on the next request via the cookie.
+    const user = await authApi.login({ email, password });
+    setUser(user);
   }, []);
 
-  const register = useCallback(async (name: string, email: string, password: string) => {
-    await authApi.register({ name, email, password });
-    await login(email, password);
-  }, [login]);
+  const register = useCallback(
+    async (name: string, email: string, password: string) => {
+      await authApi.register({ name, email, password });
+      await login(email, password);
+    },
+    [login],
+  );
 
   const refreshUser = useCallback(async () => {
     const me = await authApi.me();

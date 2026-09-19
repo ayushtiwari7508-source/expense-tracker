@@ -1,27 +1,21 @@
 import { test as base, expect } from "@playwright/test";
-import {
-  assertNoUnexpectedErrors,
-  attachAudits,
-  Audits,
-  cleanupUser,
-  registerUser,
-} from "./helpers";
+import { assertNoUnexpectedErrors, attachAudits, Audits, cleanupUser, registerUser } from "./helpers";
 
 /**
  * Extended test fixture.
  *
  *  - `page`   : isolated browser context + page (no shared cookies/storage)
  *  - `audits` : console / page-error / failed-request capture, asserted automatically
- *  - `asUser` : registers a UNIQUE user via the real API, then seeds the browser
- *               session the same way the app's AuthProvider does (localStorage
- *               "et_token") and reloads so the authenticated UI boots with that
- *               user. Tests that need to exercise the login/register UI do so
- *               explicitly with a clean page instead.
- *               Returns { token, email } for API-based setup/teardown.
+ *  - `asUser` : registers a UNIQUE user via the real API and logs them in.
+ *               Playwright's per-context request shares the cookie jar with
+ *               the browser, so the HttpOnly auth cookie set by login
+ *               authenticates the page immediately — no localStorage, and no
+ *               test ever touches a raw token.
+ *               Returns { email } for assertions/cleanup.
  */
 export const test = base.extend<{
   audits: Audits;
-  asUser: { token: string; email: string };
+  asUser: { email: string };
 }>({
   audits: async ({ page }, use, testInfo) => {
     const audits = attachAudits(page);
@@ -34,22 +28,16 @@ export const test = base.extend<{
     }
   },
 
-  asUser: async ({ page, audits }, use) => {
-    const { token, user } = await registerUser(page.request);
-    await page.addInitScript(
-      ([storedToken]) => {
-        // Same key the app's ApiClient uses (lib/api.ts TOKEN_KEY).
-        window.localStorage.setItem("et_token", storedToken!);
-      },
-      [token] as [string],
-    );
-    // First load performs the session hydration the same way the app does.
+  asUser: async ({ page }, use) => {
+    const { user } = await registerUser(page.request);
+    // First load boots the authenticated UI: the browser sends the cookie,
+    // the app restores the session through /auth/me.
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-    await use({ token, email: user.email });
+    await use({ email: user.email });
     // Auto-cleanup: best-effort, never masks the real test failure.
     try {
-      await cleanupUser(page.request, token);
+      await cleanupUser(page.request);
     } catch {
       /* best effort */
     }

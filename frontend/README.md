@@ -38,8 +38,10 @@ bundle at build time**. Changing it requires a rebuild.
 NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
 ```
 
-No backend secrets live in this app — the browser holds only the JWT access
-token it receives at login.
+No backend secrets live in this app, and it never sees the JWT: authentication
+rides in an HttpOnly cookie attached automatically by the browser
+(`credentials: "include"`), so there is no token storage and no `Authorization`
+header anywhere in this codebase.
 
 ## Development
 

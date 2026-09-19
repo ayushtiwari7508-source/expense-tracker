@@ -3,8 +3,14 @@ import { APIRequestContext, ConsoleMessage, Page, Response, TestInfo } from "@pl
 /**
  * Base URL of the FastAPI backend. Tests talk to it directly for test-data
  * setup/teardown (never to fake the app – the UI itself is always exercised).
+ *
+ * Authentication is cookie-based: login/register responses set the HttpOnly
+ * auth cookie in the Playwright cookie jar, which is shared with the browser
+ * context, so API-seeded sessions authenticate the browser automatically.
+ * No test ever handles a raw JWT.
  */
 export const API_BASE_URL = process.env.API_BASE_URL ?? "http://localhost:8000";
+const API_ROOT = API_BASE_URL.replace(/\/$/, "");
 
 export interface TestUser {
   name: string;
@@ -28,14 +34,9 @@ export const TEST_PASSWORD = "Sup3r-Secret-Pw!";
 
 export interface AuthResult {
   user: TestUser;
-  token: string;
 }
 
-/**
- * Register a brand-new user through the real API and return the JWT.
- * The register endpoint returns only the user object, so we complete a real
- * login afterwards to obtain the access token (same as the app does).
- */
+/** Register a brand-new user through the real API and log them in. */
 export async function registerUser(
   request: APIRequestContext,
   overrides: Partial<TestUser> = {},
@@ -46,23 +47,18 @@ export async function registerUser(
     password: TEST_PASSWORD,
     ...overrides,
   };
-  const res = await request.post(`${API_BASE_URL}/api/v1/auth/register`, { data: user });
+  const res = await request.post(`${API_ROOT}/api/v1/auth/register`, { data: user });
   if (!res.ok()) {
     throw new Error(`registerUser failed: ${res.status()} ${await res.text()}`);
   }
-  const login = await request.post(`${API_BASE_URL}/api/v1/auth/login`, {
+  // Login sets the HttpOnly auth cookie in the shared cookie jar.
+  const login = await request.post(`${API_ROOT}/api/v1/auth/login`, {
     data: { email: user.email, password: user.password },
   });
   if (!login.ok()) {
     throw new Error(`registerUser login failed: ${login.status()} ${await login.text()}`);
   }
-  const body = (await login.json()) as { access_token?: string };
-  if (!body.access_token) throw new Error(`registerUser: no token in response: ${JSON.stringify(body)}`);
-  return { user, token: body.access_token };
-}
-
-export function authHeaders(token: string): Record<string, string> {
-  return { Authorization: `Bearer ${token}` };
+  return { user };
 }
 
 export interface ExpenseInput {
@@ -81,40 +77,32 @@ export interface BudgetInput {
   alert_threshold: number;
 }
 
-/** Create an expense directly (setup only) via the real API. */
+/** Create an expense directly (setup only) via the real API (cookie auth). */
 export async function createExpenseApi(
   request: APIRequestContext,
-  token: string,
   expense: ExpenseInput,
 ): Promise<void> {
-  const res = await request.post(`${API_BASE_URL}/api/v1/expenses`, {
-    headers: authHeaders(token),
-    data: expense,
-  });
+  const res = await request.post(`${API_ROOT}/api/v1/expenses`, { data: expense });
   if (!res.ok()) throw new Error(`createExpenseApi failed: ${res.status()} ${await res.text()}`);
 }
 
-/** Create a budget directly (setup only) via the real API. */
+/** Create a budget directly (setup only) via the real API (cookie auth). */
 export async function createBudgetApi(
   request: APIRequestContext,
-  token: string,
   budget: BudgetInput,
 ): Promise<void> {
-  const res = await request.post(`${API_BASE_URL}/api/v1/budgets`, {
-    headers: authHeaders(token),
-    data: budget,
-  });
+  const res = await request.post(`${API_ROOT}/api/v1/budgets`, { data: budget });
   if (!res.ok()) throw new Error(`createBudgetApi failed: ${res.status()} ${await res.text()}`);
 }
 
-/** Wipe all expenses/budgets (and cascaded alerts) for a test user. */
-export async function cleanupUser(request: APIRequestContext, token: string): Promise<void> {
+/** Wipe all expenses/budgets (and cascaded alerts) for the session's user. */
+export async function cleanupUser(request: APIRequestContext): Promise<void> {
   for (const path of ["/api/v1/expenses", "/api/v1/budgets"]) {
-    const res = await request.get(`${API_BASE_URL}${path}`, { headers: authHeaders(token) });
+    const res = await request.get(`${API_ROOT}${path}`);
     if (!res.ok()) continue;
     const body = (await res.json()) as { items?: Array<{ id: string }> };
     for (const item of body.items ?? []) {
-      await request.delete(`${API_BASE_URL}${path}/${item.id}`, { headers: authHeaders(token) });
+      await request.delete(`${API_ROOT}${path}/${item.id}`);
     }
   }
 }
@@ -163,7 +151,6 @@ const IGNORED_REQUEST_PATTERNS: RegExp[] = [
 
 /**
  * Attach console + failed-response capture to a page.
- * Returns accessors used in afterEach assertions (see tests/support/fixtures.ts).
  */
 export function attachAudits(page: Page) {
   const consoleErrors: string[] = [];
@@ -171,7 +158,13 @@ export function attachAudits(page: Page) {
   const failedRequests: Array<{ url: string; status: number | null; failure?: string }> = [];
 
   const onConsole = (msg: ConsoleMessage) => {
-    if (msg.type() === "error" && !IGNORED_CONSOLE_PATTERNS.some((p) => p.test(msg.text()))) {
+    if (msg.type() !== "error") return;
+    // Cookie-auth bootstrap: the app probes /auth/me on every page load; for
+    // anonymous visitors that is an expected 401 (browsers always log failed
+    // resource loads). The login page itself is handled by app state.
+    const loc = msg.location()?.url ?? "";
+    if (loc.includes("/auth/me") && msg.text().includes("401")) return;
+    if (!IGNORED_CONSOLE_PATTERNS.some((p) => p.test(msg.text()))) {
       consoleErrors.push(msg.text());
     }
   };
@@ -181,9 +174,6 @@ export function attachAudits(page: Page) {
   const onResponse = (response: Response) => {
     const url = response.url();
     if (IGNORED_REQUEST_PATTERNS.some((p) => p.test(url))) return;
-    // Failures of interest: 5xx on the API, aborted requests, 4xx that our
-    // tests did not intentionally trigger (asserted cases are removed via
-    // `audits.dismissFailed(url)` before the check runs).
     if (response.status() >= 500 || response.status() === 0) {
       failedRequests.push({ url, status: response.status() });
     }

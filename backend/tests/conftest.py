@@ -123,7 +123,13 @@ async def client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
 # ------------------------------------------------------------- API helpers
 
 
+def get_cookie_token(client: AsyncClient) -> str | None:
+    """Auth token from the client's cookie jar (HttpOnly cookie auth)."""
+    return client.cookies.get(settings.JWT_COOKIE_NAME)
+
+
 def auth_header(token_response: dict) -> dict:
+    """Bearer header built from an auth dict (still accepted by the API)."""
     return {"Authorization": f"Bearer {token_response['access_token']}"}
 
 
@@ -133,7 +139,14 @@ async def register_and_login(
     password: str = "StrongPassword123",
     name: str = "Ayush",
 ) -> dict:
-    """Register a user and return the auth JSON (with access_token)."""
+    """Register and log in a user.
+
+    Login now sets the JWT as an HttpOnly cookie (stored automatically in
+    the httpx cookie jar); the response body no longer contains the token.
+    The token is extracted from the jar and included in the returned dict so
+    ``auth_header(...)`` keeps working for tests that exercise the bearer
+    fallback directly.
+    """
     await client.post(
         "/api/v1/auth/register",
         json={"name": name, "email": email, "password": password},
@@ -141,7 +154,10 @@ async def register_and_login(
     response = await client.post(
         "/api/v1/auth/login", json={"email": email, "password": password}
     )
-    return response.json()
+    assert response.status_code == 200, f"login failed for {email}: {response.text}"
+    token = get_cookie_token(client)
+    assert token, "login did not set the auth cookie"
+    return {"detail": response.json().get("detail"), "access_token": token}
 
 
 # ---------------------------------------------------------- data factories

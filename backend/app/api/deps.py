@@ -4,8 +4,8 @@ import uuid
 from typing import Annotated
 
 import jwt as pyjwt
-from fastapi import Depends, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, Request
+from fastapi.security.utils import get_authorization_scheme_param
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,17 +15,31 @@ from backend.app.core.exceptions import AuthenticationError
 from backend.app.core.security import decode_access_token
 from backend.app.models.user import User
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl=f"{settings.API_V1_PREFIX}/auth/login")
-
 DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
+def _extract_token(request: Request) -> str | None:
+    """Auth token for the request.
+
+    An explicit ``Authorization: Bearer`` header (deliberate non-browser API
+    clients) takes precedence; otherwise the HttpOnly cookie set at login
+    authenticates the browser, whose JavaScript never handles the token.
+    """
+    scheme, param = get_authorization_scheme_param(request.headers.get("Authorization"))
+    if scheme.lower() == "bearer" and param:
+        return param
+    return request.cookies.get(settings.JWT_COOKIE_NAME)
+
+
 async def get_current_user(
-    token: Annotated[str, Depends(oauth2_scheme)],
+    request: Request,
     db: DbSession,
 ) -> User:
-    """Resolve the authenticated user from the bearer token."""
+    """Resolve the authenticated user from the auth cookie or bearer token."""
     credentials_error = AuthenticationError("Not authenticated")
+    token = _extract_token(request)
+    if not token:
+        raise credentials_error
     try:
         payload = decode_access_token(token)
         user_id: str | None = payload.get("sub")
@@ -44,6 +58,9 @@ async def get_current_user(
     if user is None:
         raise credentials_error
     return user
+
+
+CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]

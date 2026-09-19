@@ -13,7 +13,7 @@ const daysFromToday = (n: number) => {
  * Food ₹1,000 · Travel ₹2,000 · Shopping ₹3,000 · Bills ₹4,000 ⇒ ₹10,000 total.
  * Spread over 4 days so time-series/trend endpoints have multiple points.
  */
-async function seedKnownDataset(page: import("@playwright/test").Page, token: string) {
+async function seedKnownDataset(page: import("@playwright/test").Page) {
   const rows = [
     { amount: 1000, category: "Food", description: "E2E Food", offset: 0 },
     { amount: 2000, category: "Travel", description: "E2E Travel", offset: -1 },
@@ -21,7 +21,7 @@ async function seedKnownDataset(page: import("@playwright/test").Page, token: st
     { amount: 4000, category: "Bills", description: "E2E Bills", offset: -3 },
   ];
   for (const row of rows) {
-    await createExpenseApi(page.request, token, {
+    await createExpenseApi(page.request, {
       amount: row.amount,
       category: row.category,
       description: row.description,
@@ -36,7 +36,7 @@ test.describe("Analytics", () => {
     page,
     asUser,
   }) => {
-    await seedKnownDataset(page, asUser.token);
+    await seedKnownDataset(page);
 
     await page.goto("/analytics");
 
@@ -60,7 +60,7 @@ test.describe("Analytics", () => {
   });
 
   test("trend chart renders and granularity switch updates it", async ({ page, asUser }) => {
-    await seedKnownDataset(page, asUser.token);
+    await seedKnownDataset(page);
 
     await page.goto("/analytics");
     const trend = page.getByRole("img", { name: "Spending trend" });
@@ -79,7 +79,7 @@ test.describe("Analytics", () => {
   });
 
   test("changing the date range keeps the dashboard usable", async ({ page, asUser }) => {
-    await seedKnownDataset(page, asUser.token);
+    await seedKnownDataset(page);
     await page.goto("/analytics");
 
     await page.getByRole("combobox", { name: "Date range" }).selectOption("30");
@@ -100,7 +100,7 @@ test.describe("Analytics", () => {
 
 test.describe("Dashboard", () => {
   test("dashboard stats come from the backend dataset", async ({ page, asUser }) => {
-    await seedKnownDataset(page, asUser.token);
+    await seedKnownDataset(page);
 
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();

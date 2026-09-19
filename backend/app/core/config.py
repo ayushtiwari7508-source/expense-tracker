@@ -38,6 +38,17 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
 
+    # Auth cookie (centralized configuration; see app/core/cookies.py).
+    # JWT_COOKIE_SECURE defaults to None (= auto): True when APP_ENV=production,
+    # False otherwise. Set it explicitly for deployments that differ (e.g. an
+    # HTTP-only staging box, or production behind TLS termination).
+    JWT_COOKIE_NAME: str = "access_token"
+    JWT_COOKIE_SECURE: bool | None = None
+    JWT_COOKIE_HTTP_ONLY: bool = True
+    JWT_COOKIE_SAMESITE: str = "lax"
+    JWT_COOKIE_PATH: str = "/"
+    JWT_COOKIE_DOMAIN: str | None = None
+
     # CORS
     CORS_ORIGINS: str = "http://localhost:3000"
 
@@ -61,6 +72,14 @@ class Settings(BaseSettings):
             raise ValueError("ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 1440")
         return value
 
+    @field_validator("JWT_COOKIE_SAMESITE")
+    @classmethod
+    def validate_cookie_samesite(cls, value: str) -> str:
+        allowed = {"lax", "strict", "none"}
+        if value.lower() not in allowed:
+            raise ValueError(f"JWT_COOKIE_SAMESITE must be one of {sorted(allowed)}")
+        return value.lower()
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
@@ -68,6 +87,28 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.APP_ENV == "production"
+
+    @property
+    def jwt_cookie_secure_effective(self) -> bool:
+        """Resolve Secure flag: explicit env var wins, otherwise follow APP_ENV."""
+        if self.JWT_COOKIE_SECURE is None:
+            return self.is_production
+        return self.JWT_COOKIE_SECURE
+
+    @property
+    def jwt_cookie_params(self) -> dict:
+        """Keyword arguments for response.set_cookie/delete_cookie.
+
+        Single source of truth so set and clear always agree on scope.
+        """
+        return {
+            "key": self.JWT_COOKIE_NAME,
+            "path": self.JWT_COOKIE_PATH,
+            "domain": self.JWT_COOKIE_DOMAIN,
+            "secure": self.jwt_cookie_secure_effective,
+            "httponly": self.JWT_COOKIE_HTTP_ONLY,
+            "samesite": self.JWT_COOKIE_SAMESITE,
+        }
 
 
 @lru_cache

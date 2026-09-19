@@ -1,8 +1,10 @@
 // Typed client for the FastAPI backend.
+//
+// Authentication uses an HttpOnly cookie: the browser attaches it
+// automatically to same-origin API requests (`credentials: "include"`),
+// and JavaScript never reads or stores the token.
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000/api/v1";
-
-const TOKEN_KEY = "et_token";
 
 export class ApiError extends Error {
   status: number;
@@ -10,17 +12,6 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
   }
-}
-
-export function getToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem(TOKEN_KEY);
-}
-
-export function setToken(token: string | null): void {
-  if (typeof window === "undefined") return;
-  if (token) window.localStorage.setItem(TOKEN_KEY, token);
-  else window.localStorage.removeItem(TOKEN_KEY);
 }
 
 async function request<T>(
@@ -35,19 +26,16 @@ async function request<T>(
     }
   }
 
-  const headers: Record<string, string> = {};
-  const token = getToken();
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  let body: BodyInit | undefined;
-  if (options.body !== undefined) {
-    headers["Content-Type"] = "application/json";
-    body = JSON.stringify(options.body);
-  }
-
+  // The auth cookie travels with every request; no Authorization header is
+  // constructed in JS and the token is never readable by this code.
   let response: Response;
   try {
-    response = await fetch(url.toString(), { method, headers, body });
+    response = await fetch(url.toString(), {
+      method,
+      credentials: "include",
+      headers: options.body !== undefined ? { "Content-Type": "application/json" } : undefined,
+      body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    });
   } catch {
     throw new ApiError(0, "Cannot reach the server. Check your connection and try again.");
   }
@@ -91,7 +79,6 @@ import type {
   InsightsResponse,
   Summary,
   TimeSeries,
-  TokenResponse,
   TopExpenseItem,
   TrendPoint,
   User,
@@ -100,12 +87,15 @@ import type {
 export const authApi = {
   register: (data: { name: string; email: string; password: string }) =>
     api.post<User>("/auth/register", data),
-  login: (data: { email: string; password: string }) =>
-    api.post<TokenResponse>("/auth/login", data),
+  /** Login sets the HttpOnly auth cookie and returns the user profile
+   *  (the token itself is never in the response body). */
+  login: (data: { email: string; password: string }) => api.post<User>("/auth/login", data),
   me: () => api.get<User>("/auth/me"),
   updateMe: (data: { name?: string; email?: string }) => api.patch<User>("/users/me", data),
   changePassword: (data: { current_password: string; new_password: string }) =>
     api.patch<{ detail: string }>("/users/me/password", data),
+  /** Logout clears the auth cookie server-side. */
+  logout: () => api.post<{ detail: string }>("/auth/logout"),
 };
 
 export const expenseApi = {
@@ -166,5 +156,3 @@ export const analyticsApi = {
   insights: (startDate?: string, endDate?: string) =>
     api.get<InsightsResponse>("/analytics/insights", { start_date: startDate, end_date: endDate }),
 };
-
-export type { Alert, Budget, Expense };

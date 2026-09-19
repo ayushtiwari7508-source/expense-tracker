@@ -1,13 +1,20 @@
-"""Authentication routes."""
+"""Authentication routes.
 
-from fastapi import APIRouter, Request, status
+Authentication uses an HttpOnly cookie: login sets the JWT in a secure cookie
+(see ``app/core/cookies.py``); the browser sends it automatically and frontend
+JavaScript never handles the token. The Authorization bearer header remains
+accepted by the auth dependency as a fallback for non-browser API clients.
+"""
+
+from fastapi import APIRouter, Request, Response, status
 
 from backend.app.api.deps import CurrentUser, DbSession
+from backend.app.core.cookies import clear_auth_cookie, set_auth_cookie
 from backend.app.core.exceptions import ValidationError
 from backend.app.schemas.auth import (
+    LoginRequest,
     MessageResponse,
     RegisterRequest,
-    TokenResponse,
 )
 from backend.app.schemas.user import UserResponse
 from backend.app.services import auth_service
@@ -53,18 +60,19 @@ async def _extract_credentials(request: Request) -> tuple[str, str]:
 
 @router.post(
     "/login",
-    response_model=TokenResponse,
-    summary="Login (OAuth2 password flow)",
+    response_model=UserResponse,
+    summary="Login and set the auth cookie",
     description=(
-        "Accepts OAuth2 form credentials (username=email, password) and also "
-        "accepts a JSON body with email/password for convenience. Returns a "
-        "JWT bearer access token."
+        "Validates credentials and sets the JWT access token in an HttpOnly "
+        "cookie (browser sends it automatically). The response body returns "
+        "only the user profile — the raw token is never exposed to JavaScript."
     ),
 )
-async def login(request: Request, db: DbSession) -> TokenResponse:
+async def login(request: Request, response: Response, db: DbSession) -> UserResponse:
     email, password = await _extract_credentials(request)
     user = await auth_service.authenticate_user(db, email, password)
-    return TokenResponse(access_token=auth_service.create_token_for_user(user))
+    set_auth_cookie(response, auth_service.create_token_for_user(user))
+    return UserResponse.model_validate(user)
 
 
 @router.get(
@@ -80,8 +88,13 @@ async def me(current_user: CurrentUser) -> UserResponse:
 @router.post(
     "/logout",
     response_model=MessageResponse,
-    summary="Logout (client-side token discard)",
+    summary="Logout and clear the auth cookie",
+    description=(
+        "Removes the authentication cookie using the same name/path/domain "
+        "it was set with. Intentionally requires no valid session so an "
+        "expired-cookie logout still succeeds."
+    ),
 )
-async def logout(current_user: CurrentUser) -> MessageResponse:
-    _ = current_user  # stateless JWT: client discards the token
+async def logout(response: Response) -> MessageResponse:
+    clear_auth_cookie(response)
     return MessageResponse(detail="Logged out")

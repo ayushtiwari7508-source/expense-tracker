@@ -17,7 +17,6 @@ async function openBudgetDialog(page: import("@playwright/test").Page) {
 test.describe("Budgets", () => {
   test("create, utilization integration, edit, delete", async ({ page, asUser }) => {
     const api = process.env.API_BASE_URL ?? "http://localhost:8000";
-    const headers = { Authorization: `Bearer ${asUser.token}` };
 
     await page.goto("/budgets");
 
@@ -31,7 +30,6 @@ test.describe("Budgets", () => {
 
     // ---- Integration: ₹4,000 expense ⇒ 40% used, ₹6,000 left -------------
     const res = await page.request.post(`${api}/api/v1/expenses`, {
-      headers,
       data: {
         amount: 4000,
         category: "Shopping",
@@ -76,16 +74,13 @@ test.describe("Budgets", () => {
   });
 
   test("second expense updates utilization", async ({ page, asUser }) => {
-    const api = process.env.API_BASE_URL ?? "http://localhost:8000";
-    const headers = { Authorization: `Bearer ${asUser.token}` };
-
-    await createBudgetApi(page.request, asUser.token, {
+    await createBudgetApi(page.request, {
       amount: 10000,
       start_date: daysFromToday(0),
       end_date: daysFromToday(30),
       alert_threshold: 50,
     });
-    await createExpenseApi(page.request, asUser.token, {
+    await createExpenseApi(page.request, {
       amount: 4000,
       category: "Shopping",
       payment_method: "Credit Card",
@@ -96,7 +91,7 @@ test.describe("Budgets", () => {
     const row = page.locator("li").filter({ hasText: "Overall" });
     await expect(row).toContainText("40% used");
 
-    await createExpenseApi(page.request, asUser.token, {
+    await createExpenseApi(page.request, {
       amount: 3000,
       category: "Food",
       payment_method: "UPI",

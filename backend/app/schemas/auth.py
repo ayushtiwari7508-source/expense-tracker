@@ -26,6 +26,8 @@ class LoginRequest(BaseModel):
 
 
 class TokenResponse(BaseModel):
+    """Bearer token response (kept for non-browser API clients)."""
+
     access_token: str
     token_type: str = "bearer"
 

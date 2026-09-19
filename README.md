@@ -123,11 +123,54 @@ local backend development. Never commit real `.env` files.
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | backend | no | default `30` |
 | `APP_ENV` / `DEBUG` | backend | no | production: `APP_ENV=production`, `DEBUG=false` |
 | `PORT` | backend container | no | uvicorn binds `0.0.0.0:$PORT` (default 8000) |
+| `JWT_COOKIE_NAME` | backend | no | default `access_token` |
+| `JWT_COOKIE_SECURE` | backend | no | unset = auto (`true` when `APP_ENV=production`) |
+| `JWT_COOKIE_HTTP_ONLY` | backend | no | default `true` — do not disable |
+| `JWT_COOKIE_SAMESITE` | backend | no | `lax` (default) \| `strict` \| `none` |
+| `JWT_COOKIE_PATH` | backend | no | default `/` |
+| `JWT_COOKIE_DOMAIN` | backend | no | unset = host-only; set only for sibling-subdomain deployments |
 | `NEXT_PUBLIC_API_URL` | frontend **build arg** | no | baked at build time; must be browser-reachable |
 
 `NEXT_PUBLIC_*` variables are inlined into the client bundle at **build** time —
 changing the API URL requires rebuilding the frontend image. No backend secrets
 are ever exposed to the frontend.
+
+## Authentication & security
+
+**The JWT is stored in an HttpOnly cookie and is never exposed to JavaScript.**
+An XSS vulnerability cannot read the token, and the frontend contains no token
+storage, no `Authorization` header construction, and no `localStorage` JWT.
+
+```
+Login → FastAPI validates credentials → JWT → Set-Cookie (HttpOnly)
+Browser attaches cookie automatically → FastAPI extracts & validates JWT
+Logout → server clears cookie → /auth/me returns 401
+```
+
+- **HttpOnly** — always `true`; JavaScript cannot read the cookie.
+- **Secure** — `true` when `APP_ENV=production` (auto, or force via
+  `JWT_COOKIE_SECURE`). Never disabled in real production deployments.
+- **SameSite** — `lax` by default. The deployed architecture is same-site
+  (Next.js and FastAPI behind one origin / `localhost` ports in dev), so `lax`
+  blocks cross-site CSRF while keeping normal navigation working. Cross-site
+  subdomain deployments would need `none` **plus** a CSRF token strategy.
+- **CSRF strategy** — the `SameSite=Lax` cookie is the primary defense: cross-
+  site pages cannot trigger authenticated POST/PATCH/DELETE with cookies, and
+  all state-changing endpoints are JSON-only (never form-encoded), which
+  cross-origin forms cannot produce without a CORS grant. A double-submit CSRF
+  token would only become necessary with a cross-site cookie deployment.
+- **CORS** — `allow_credentials=True` with an **explicit origin allowlist**
+  (`CORS_ORIGINS`); wildcard `*` is never used with credentials.
+- **Bearer fallback** — the auth dependency still accepts an explicit
+  `Authorization: Bearer` header (explicit headers win over the cookie) so
+  scripts/CI clients keep working; the browser uses only the cookie.
+- **API security headers** — `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: same-origin`, and a restrictive `Content-Security-Policy`
+  (`default-src 'none'; frame-ancestors 'none'`) are set on API responses; the
+  API serves JSON only, so this cannot break the Next.js frontend or ECharts.
+- **Passwords** — Argon2id hashed (never returned by any endpoint); the JWT
+  secret is server-side only (`JWT_SECRET_KEY`), never in frontend code or
+  `NEXT_PUBLIC_*` variables.
 
 ## Database setup & migrations
 

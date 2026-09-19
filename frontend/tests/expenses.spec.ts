@@ -107,7 +107,6 @@ test.describe("Expense search, filters, sorting, pagination", () => {
     for (let i = 0; i < 24; i += 1) {
       const idx = i % descriptions.length;
       await page.request.post(`${process.env.API_BASE_URL ?? "http://localhost:8000"}/api/v1/expenses`, {
-        headers: { Authorization: `Bearer ${asUser.token}` },
         data: {
           amount: (i + 1) * 100, // 100 … 1200, all distinct
           category: ["Food", "Travel", "Shopping", "Bills"][idx],

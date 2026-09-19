@@ -1,6 +1,6 @@
 import { expect } from "@playwright/test";
 import { test } from "./support/fixtures";
-import { createBudgetApi, createExpenseApi, uniqueEmail, TEST_PASSWORD } from "./support/helpers";
+import { uniqueEmail, TEST_PASSWORD } from "./support/helpers";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const daysFromToday = (n: number) => {
@@ -31,10 +31,7 @@ test.describe("User isolation", () => {
     const emailA = await registerViaUi(pageA, "Isolated A");
     const emailB = await registerViaUi(pageB, "Isolated B");
 
-    // Extract each user's token from their own session for API seeding.
-    async function tokenOf(page: import("@playwright/test").Page): Promise<string> {
-      return page.evaluate(() => window.localStorage.getItem("et_token") ?? "");
-    }
+    // Each context's request shares its own cookie jar; no tokens are read.
 
     // User A creates an expense and a budget through the UI.
     await pageA.goto("/expenses");
@@ -78,26 +75,23 @@ test.describe("User isolation", () => {
     await pageB.goto("/budgets");
     await expect(pageB.getByText("No budgets yet")).toBeVisible(); // A's budget is not B's
 
-    // Deleting must also be isolated: B cannot delete A's expense by id.
-    const tokenA = await tokenOf(pageA);
+    // Deleting must also be isolated: B (own cookie jar) cannot delete A's
+    // expense by id — the server scopes the lookup to the session user.
     const listA = await (await pageA.request.get(
       `${process.env.API_BASE_URL ?? "http://localhost:8000"}/api/v1/expenses`,
-      { headers: { Authorization: `Bearer ${tokenA}` } },
     )).json();
     const expenseAId = listA.items[0].id;
-    const tokenB = await tokenOf(pageB);
     const forged = await pageB.request.delete(
       `${process.env.API_BASE_URL ?? "http://localhost:8000"}/api/v1/expenses/${expenseAId}`,
-      { headers: { Authorization: `Bearer ${tokenB}` } },
     );
     expect([401, 403, 404]).toContain(forged.status());
     await pageA.goto("/expenses");
     await expect(pageA.getByText("A's private lunch")).toBeVisible(); // still there
 
-    // Cleanup both users.
+    // Cleanup both users (each jar cleans its own session's data).
     const { cleanupUser } = await import("./support/helpers");
-    await cleanupUser(pageA.request, tokenA);
-    await cleanupUser(pageB.request, tokenB);
+    await cleanupUser(pageA.request);
+    await cleanupUser(pageB.request);
     await contextA.close();
     await contextB.close();
   });

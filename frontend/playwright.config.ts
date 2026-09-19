@@ -44,11 +44,18 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
-    {
-      name: "mobile-safari",
-      testIgnore: /responsive\.spec\.ts/, // responsive spec drives its own viewports
-      use: { ...devices["iPhone 13"] },
-    },
+    // Opt-in (E2E_MOBILE=1): WebKit's Playwright build partitions cookies per
+    // localhost port, so cookie-authenticated sessions require a same-origin
+    // API (the production reverse-proxy pattern) — see README "End-to-end tests".
+    ...(process.env.E2E_MOBILE
+      ? [
+          {
+            name: "mobile-safari",
+            testIgnore: /responsive\.spec\.ts/,
+            use: { ...devices["iPhone 13"] },
+          },
+        ]
+      : []),
   ],
   webServer: process.env.E2E_BASE_URL
     ? undefined

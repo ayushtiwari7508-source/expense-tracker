@@ -10,19 +10,15 @@ const daysFromToday = (n: number) => {
 };
 
 /** Budget ₹1,000 @ 50% threshold + ₹800 spending ⇒ 80% ⇒ WARNING alert. */
-async function seedThresholdCrossing(
-  page: import("@playwright/test").Page,
-  token: string,
-  amount = 800,
-) {
-  await createBudgetApi(page.request, token, {
+async function seedThresholdCrossing(page: import("@playwright/test").Page) {
+  await createBudgetApi(page.request, {
     amount: 1000,
     start_date: daysFromToday(0),
     end_date: daysFromToday(30),
     alert_threshold: 50,
   });
-  await createExpenseApi(page.request, token, {
-    amount,
+  await createExpenseApi(page.request, {
+    amount: 800,
     category: "Food",
     payment_method: "UPI",
     description: "E2E threshold expense",
@@ -37,7 +33,7 @@ async function seedThresholdCrossing(
 
 test.describe("Alerts", () => {
   test("crossing the budget threshold generates a warning alert", async ({ page, asUser }) => {
-    await seedThresholdCrossing(page, asUser.token);
+    await seedThresholdCrossing(page);
 
     await page.getByRole("link", { name: "Alerts" }).click();
     await expect(page).toHaveURL(/\/alerts/);
@@ -45,11 +41,11 @@ test.describe("Alerts", () => {
     await expect(page.getByRole("heading", { name: "Alerts" })).toBeVisible();
     await expect(page.getByText(/unread alert/i).first()).toBeVisible();
     await expect(page.getByText("Budget warning").first()).toBeVisible();
-    await expect(page.getByText("Unread").first()).toBeVisible();
+    await expect(page.getByText("Unread", { exact: true }).first()).toBeVisible();
   });
 
   test("marking an alert as read clears its unread state", async ({ page, asUser }) => {
-    await seedThresholdCrossing(page, asUser.token);
+    await seedThresholdCrossing(page);
 
     await page.getByRole("link", { name: "Alerts" }).click();
     const alertItem = page.locator("li").filter({ hasText: "Budget warning" });
@@ -62,15 +58,14 @@ test.describe("Alerts", () => {
   });
 
   test("mark all read clears every unread alert", async ({ page, asUser }) => {
-    await seedThresholdCrossing(page, asUser.token);
+    await seedThresholdCrossing(page);
 
     await page.getByRole("link", { name: "Alerts" }).click();
-    await expect(page.getByText("Unread").first()).toBeVisible();
+    await expect(page.getByText("Unread", { exact: true }).first()).toBeVisible();
 
     await page.getByRole("button", { name: "Mark all read" }).click();
     await expect(page.getByText("All alerts marked as read.")).toBeVisible(); // toast
     await expect(page.getByText("You're all caught up.")).toBeVisible();
-    // exact match: the "Unread only" filter button must not count as an unread badge
     await expect(page.getByText("Unread", { exact: true })).toHaveCount(0);
   });
 

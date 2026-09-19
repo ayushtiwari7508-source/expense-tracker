@@ -53,6 +53,10 @@ jobs:
 
       - name: Run migrations against the test database
         working-directory: backend
+        env:
+          # Alembic resolves the URL from settings.DATABASE_URL, which defaults
+          # to the local dev database; CI must migrate the test database.
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/expense_tracker_test
         run: alembic upgrade head
 
       - name: Run tests
